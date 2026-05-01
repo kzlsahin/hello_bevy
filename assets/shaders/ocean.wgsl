@@ -29,19 +29,21 @@ struct TrochoidalResult {
 // When adding/removing a wave: change WAVE_COUNT and the two literals on the next two lines together.
 const WAVE_COUNT: u32 = 11u;
 fn ocean_waves() -> array<WaveParams, 11> {
-    //                    direction                   amp    λ(m)  speed  Q     phase
+    // Wind from +X. All directions pre-normalized at spread angles; Q decreases with wavelength
+    // to prevent stripes. Speeds follow deep-water dispersion: c ≈ 1.25 * sqrt(lambda).
+    //                   dir (normalized)            amp   λ(m)  speed   Q    phase
     return array<WaveParams, 11>(
-        WaveParams(vec2<f32>( 1.0,     0.0    ),     0.80, 23.0,  8.0, 0.7, 0.0),
-        WaveParams(vec2<f32>( 0.6,     0.8    ),     0.50, 60.0, 15.0, 0.3, 1.2),
-        WaveParams(vec2<f32>( 1.0,     0.0    ),     0.40, 20.0,  6.0, 0.6, 0.7),
-        WaveParams(vec2<f32>(-0.8,     0.6    ),     0.10, 10.0,  6.0, 0.6, 2.4),
-        WaveParams(vec2<f32>( 0.8,    -0.6    ),     0.10, 10.0,  6.0, 0.6, 1.8),
-        WaveParams(vec2<f32>( 0.2874, -0.9578 ),     0.05,  1.0,  0.4, 0.9, 0.2),
-        WaveParams(vec2<f32>(-0.2874,  0.9578 ),     0.05,  1.0,  0.5, 0.8, 0.8),
-        WaveParams(vec2<f32>(-0.2874,  0.9578 ),     0.04,  5.0,  0.6, 0.8, 0.8),
-        WaveParams(vec2<f32>(0.2874,  0.9578 ),     0.05,  1.0,  0.3, 0.9, 0.4),
-        WaveParams(vec2<f32>(0.2874,  0.9578 ),     0.05,  10.0,  0.4, 0.9, 0.4),
-        WaveParams(vec2<f32>(0.2874,  0.9578 ),     0.05,  3.0,  0.5, 0.9, 0.4),
+        WaveParams(vec2<f32>( 1.0000,  0.0000 ),    0.80, 28.0,  6.6, 0.55, 0.0 ),  // main swell
+        WaveParams(vec2<f32>( 0.9659,  0.2588 ),    0.55, 45.0,  8.4, 0.40, 1.4 ),  // swell +15°
+        WaveParams(vec2<f32>( 0.8660, -0.5000 ),    0.30, 18.0,  5.3, 0.40, 0.7 ),  // cross -30°
+        WaveParams(vec2<f32>( 0.9659, -0.2588 ),    0.22, 22.0,  5.9, 0.38, 2.1 ),  // cross -15°
+        WaveParams(vec2<f32>( 0.7071,  0.7071 ),    0.14, 10.0,  4.0, 0.30, 0.3 ),  // chop  +45°
+        WaveParams(vec2<f32>( 0.8660,  0.5000 ),    0.11,  8.0,  3.5, 0.28, 1.8 ),  // chop  +30°
+        WaveParams(vec2<f32>( 0.7071, -0.7071 ),    0.08,  5.5,  2.9, 0.20, 2.5 ),  // chop  -45°
+        WaveParams(vec2<f32>(-0.7071,  0.7071 ),    0.05,  4.0,  2.5, 0.15, 0.9 ),  // reflected
+        WaveParams(vec2<f32>( 0.9239,  0.3827 ),    0.04,  2.8,  2.1, 0.12, 1.6 ),  // ripple +22.5°
+        WaveParams(vec2<f32>( 0.5000, -0.8660 ),    0.03,  2.0,  1.8, 0.10, 0.5 ),  // ripple -60°
+        WaveParams(vec2<f32>(-0.5000,  0.8660 ),    0.02,  1.5,  1.5, 0.08, 3.0 ),  // micro  +120°
     );
 }
 // ------------------------------------------------------
