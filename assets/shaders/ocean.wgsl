@@ -40,8 +40,8 @@ fn ocean_waves() -> array<WaveParams, 11> {
         WaveParams(vec2<f32>( 0.7071,  0.7071 ),    0.14, 10.0,  4.0, 0.30, 0.3 ),  // chop  +45°
         WaveParams(vec2<f32>( 0.8660,  0.5000 ),    0.11,  8.0,  3.5, 0.28, 1.8 ),  // chop  +30°
         WaveParams(vec2<f32>( 0.7071, -0.7071 ),    0.08,  5.5,  2.9, 0.20, 2.5 ),  // chop  -45°
-        WaveParams(vec2<f32>(-0.7071,  0.7071 ),    0.05,  4.0,  2.5, 0.15, 0.9 ),  // reflected
-        WaveParams(vec2<f32>( 0.9239,  0.3827 ),    0.04,  2.8,  2.1, 0.12, 1.6 ),  // ripple +22.5°
+        WaveParams(vec2<f32>(-0.7071,  0.7071 ),    0.05,  4.0,  2.5, 0.25, 0.9 ),  // reflected
+        WaveParams(vec2<f32>( 0.9239,  0.3827 ),    0.04,  2.8,  2.1, 0.32, 1.6 ),  // ripple +22.5°
         WaveParams(vec2<f32>( 0.5000, -0.8660 ),    0.03,  2.0,  1.8, 0.10, 0.5 ),  // ripple -60°
         WaveParams(vec2<f32>(-0.5000,  0.8660 ),    0.02,  1.5,  1.5, 0.08, 3.0 ),  // micro  +120°
     );
@@ -86,11 +86,18 @@ fn wave_normal_only(xz: vec2<f32>, wave: WaveParams, time: f32) -> vec3<f32> {
     );
 }
 
-// Precise analytical normal at an undisplaced grid position — avoids vertex interpolation blur.
-fn precise_normal(xz: vec2<f32>, time: f32) -> vec3<f32> {
+// Precise analytical normal with distance-based LOD.
+// Waves are ordered largest→smallest, so trimming the tail drops sub-pixel detail first.
+//   < 20 m : all 11 waves
+//   20–60 m : 8 waves  (skip λ < 3 m ripples)
+//   > 60 m : 5 waves  (skip λ < 8 m chop + ripples)
+fn precise_normal(xz: vec2<f32>, time: f32, dist_sq: f32) -> vec3<f32> {
     let waves = ocean_waves();
+    var count = WAVE_COUNT;
+    if dist_sq > 3600.0 { count = 5u; }
+    else if dist_sq > 400.0 { count = 8u; }
     var n = vec3<f32>(0.0, 0.0, 0.0);
-    for (var i = 0u; i < WAVE_COUNT; i++) {
+    for (var i = 0u; i < count; i++) {
         n += wave_normal_only(xz, waves[i], time);
     }
     return normalize(n);
@@ -104,6 +111,11 @@ struct OceanVertexOutput {
     @location(3) orig_xz:             vec2<f32>,
 };
 
+// Waves beyond this index have wavelengths < 3 m: negligible geometry displacement,
+// so the vertex stage only runs the large/medium waves. The fragment stage handles
+// the remainder as normal detail (see precise_normal).
+const VERTEX_WAVE_COUNT: u32 = 8u;
+
 @vertex
 fn vertex(
     @location(0) position: vec3<f32>,
@@ -113,7 +125,7 @@ fn vertex(
     let waves = ocean_waves();
     var pos = position;
     var n   = vec3<f32>(0.0, 0.0, 0.0);
-    for (var i = 0u; i < WAVE_COUNT; i++) {
+    for (var i = 0u; i < VERTEX_WAVE_COUNT; i++) {
         let r = trochoidal_wave(pos, waves[i], material.time);
         pos = r.position;
         n  += r.normal;
@@ -130,8 +142,10 @@ fn vertex(
 
 @fragment
 fn fragment(in: OceanVertexOutput) -> @location(0) vec4<f32> {
-    let N = precise_normal(in.orig_xz, material.time);
-    let V = normalize(material.camera_pos - in.world_position.xyz);
+    let to_cam  = material.camera_pos - in.world_position.xyz;
+    let dist_sq = dot(to_cam, to_cam);
+    let N = precise_normal(in.orig_xz, material.time, dist_sq);
+    let V = normalize(to_cam);
     // Derived from Transform::from_rotation(Quat::from_euler(XYZ, -45°, 45°, 0°))
     let L = vec3<f32>(0.5, 0.707, 0.5);
 
@@ -151,5 +165,15 @@ fn fragment(in: OceanVertexOutput) -> @location(0) vec4<f32> {
     let water_color = base_color * (0.12 + 0.45 * NdotL);
     let reflection  = vec3<f32>(0.25, 0.45, 0.75) + sun_spec * 2.5;
 
-    return vec4<f32>(mix(water_color, reflection, fresnel), 1.0);
+    let lit = mix(water_color, reflection, fresnel);
+
+    // Foam on breaking crests.
+    // N.y drops toward 0 where the surface is steepest (Gerstner crest about to overturn).
+    // Only show foam above mean water level so troughs stay clean.
+    let steepness  = 1.0 - N.y;
+    let foam_t     = clamp((steepness - 0.15) / 0.15, 0.0, 1.0);
+    let above_mean = clamp(in.world_position.y * 1.2, 0.0, 1.0);
+    let foam       = foam_t * above_mean;
+
+    return vec4<f32>(mix(lit, vec3<f32>(0.92, 0.95, 1.0), foam), 1.0);
 }

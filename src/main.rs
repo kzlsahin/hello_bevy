@@ -35,7 +35,7 @@ fn setup(
         ))
     ));
 
-    let mesh = meshes.add(Plane3d::default().mesh().size(100.0, 100.0).subdivisions(500).build());
+    let mesh = meshes.add(Plane3d::default().mesh().size(500.0, 500.0).subdivisions(1000).build());
 
     let material = materials.add(OceanMaterial {
          params: OceanMaterialUniform {
