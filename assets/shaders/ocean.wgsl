@@ -33,8 +33,8 @@ fn ocean_waves() -> array<WaveParams, 11> {
     // to prevent stripes. Speeds follow deep-water dispersion: c ≈ 1.25 * sqrt(lambda).
     //                   dir (normalized)            amp   λ(m)  speed   Q    phase
     return array<WaveParams, 11>(
-        WaveParams(vec2<f32>( 1.0000,  0.0000 ),    0.80, 28.0,  6.6, 0.55, 0.0 ),  // main swell
-        WaveParams(vec2<f32>( 0.9659,  0.2588 ),    0.55, 45.0,  8.4, 0.40, 1.4 ),  // swell +15°
+        WaveParams(vec2<f32>( 1.0000,  0.0000 ),    0.80, 28.0,  6.6, 0.75, 0.0 ),  // main swell
+        WaveParams(vec2<f32>( 0.9659,  0.2588 ),    0.55, 45.0,  8.4, 0.80, 1.4 ),  // swell +15°
         WaveParams(vec2<f32>( 0.8660, -0.5000 ),    0.30, 18.0,  5.3, 0.40, 0.7 ),  // cross -30°
         WaveParams(vec2<f32>( 0.9659, -0.2588 ),    0.22, 22.0,  5.9, 0.38, 2.1 ),  // cross -15°
         WaveParams(vec2<f32>( 0.7071,  0.7071 ),    0.14, 10.0,  4.0, 0.30, 0.3 ),  // chop  +45°
@@ -174,6 +174,13 @@ fn fragment(in: OceanVertexOutput) -> @location(0) vec4<f32> {
     let foam_t     = clamp((steepness - 0.15) / 0.15, 0.0, 1.0);
     let above_mean = clamp(in.world_position.y * 1.2, 0.0, 1.0);
     let foam       = foam_t * above_mean;
+    let foamed     = mix(lit, vec3<f32>(0.92, 0.95, 1.0), foam);
 
-    return vec4<f32>(mix(lit, vec3<f32>(0.92, 0.95, 1.0), foam), 1.0);
+    // Horizon fog: fades ocean into the sky color so the mesh edge is never visible.
+    // Must match the ClearColor set in main.rs.
+    let horizon    = vec3<f32>(0.60, 0.72, 0.87);
+    let fog_dist   = sqrt(dist_sq);
+    let fog_t      = clamp((fog_dist - 120.0) / 180.0, 0.0, 1.0);
+
+    return vec4<f32>(mix(foamed, horizon, fog_t), 1.0);
 }

@@ -9,10 +9,11 @@ use ocean_material::OceanMaterialUniform;
 fn main() {
     App::new()
     .add_plugins(DefaultPlugins)
-    .add_plugins(FreeCameraPlugin) // <- add this
-    .add_plugins(MaterialPlugin::<OceanMaterial>::default()) // <- add this
+    .insert_resource(ClearColor(Color::srgb(0.60, 0.72, 0.87))) // must match horizon fog in ocean.wgsl
+    .add_plugins(FreeCameraPlugin)
+    .add_plugins(MaterialPlugin::<OceanMaterial>::default())
     .add_systems(Startup, setup)
-    .add_systems(Update, update_ocean_uniforms) // <- add update system
+    .add_systems(Update, update_ocean_uniforms)
     .add_plugins(CameraPlugin)
     .run();
 }
@@ -35,7 +36,7 @@ fn setup(
         ))
     ));
 
-    let mesh = meshes.add(Plane3d::default().mesh().size(500.0, 500.0).subdivisions(1000).build());
+    let mesh = meshes.add(Plane3d::default().mesh().size(500.0, 500.0).subdivisions(500).build());
 
     let material = materials.add(OceanMaterial {
          params: OceanMaterialUniform {
