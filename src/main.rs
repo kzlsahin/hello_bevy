@@ -1,17 +1,27 @@
+mod buoyancy;
 mod ocean_material;
+mod ocean_waves;
 mod shaders;
 
 use bevy::prelude::*;
-use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState};
+use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
+use buoyancy::{AngularVelocity, Buoyant, BuoyancyPlugin, LinearVelocity};
 use ocean_material::OceanMaterial;
 use ocean_material::OceanMaterialUniform;
 
 fn main() {
     App::new()
-    .add_plugins(DefaultPlugins)
+    // Pins the asset root to the crate directory at compile time so `assets/` is found
+    // whether the app is launched via `cargo run` or by running target/debug/hello_bevy.exe
+    // directly (bevy otherwise falls back to looking next to the .exe in the latter case).
+    .add_plugins(DefaultPlugins.set(AssetPlugin {
+        file_path: format!("{}/assets", env!("CARGO_MANIFEST_DIR")),
+        ..default()
+    }))
     .insert_resource(ClearColor(Color::srgb(0.60, 0.72, 0.87))) // must match horizon fog in ocean.wgsl
     .add_plugins(FreeCameraPlugin)
     .add_plugins(MaterialPlugin::<OceanMaterial>::default())
+    .add_plugins(BuoyancyPlugin)
     .add_systems(Startup, setup)
     .add_systems(Update, update_ocean_uniforms)
     .add_plugins(CameraPlugin)
@@ -22,6 +32,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<OceanMaterial>>,
+    mut standard_materials: ResMut<Assets<StandardMaterial>>,
 ) {
     commands.spawn(( DirectionalLight {
             color: Color::srgb(1.0, 0.95, 0.8), // warm sunlight
@@ -52,7 +63,22 @@ fn setup(
     Transform::from_xyz(0.0, 0.0, 0.0)
     ));
 
-
+    // Placeholder floating object — swap this mesh for a real boat/buoy asset later.
+    // Half-extents (1.0, 0.5, 1.0) drive both the buoyancy sample footprint and this box's size.
+    let buoy = Buoyant::default();
+    let float_mesh = meshes.add(Cuboid::from_size(buoy.half_extents * 2.0));
+    let float_material = standard_materials.add(StandardMaterial {
+        base_color: Color::srgb(0.55, 0.35, 0.2),
+        ..default()
+    });
+    commands.spawn((
+        Mesh3d(float_mesh),
+        MeshMaterial3d(float_material),
+        Transform::from_xyz(15.0, 1.5, 0.0),
+        buoy,
+        LinearVelocity::default(),
+        AngularVelocity::default(),
+    ));
 }
 
 // Plugin that spawns the camera.
