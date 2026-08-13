@@ -3,9 +3,10 @@ mod ocean_material;
 mod ocean_waves;
 mod shaders;
 
+use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
-use buoyancy::{AngularVelocity, Buoyant, BuoyancyPlugin, LinearVelocity};
+use buoyancy::{Buoyant, BuoyancyPlugin};
 use ocean_material::OceanMaterial;
 use ocean_material::OceanMaterialUniform;
 
@@ -21,6 +22,7 @@ fn main() {
     .insert_resource(ClearColor(Color::srgb(0.60, 0.72, 0.87))) // must match horizon fog in ocean.wgsl
     .add_plugins(FreeCameraPlugin)
     .add_plugins(MaterialPlugin::<OceanMaterial>::default())
+    .add_plugins(PhysicsPlugins::default())
     .add_plugins(BuoyancyPlugin)
     .add_systems(Startup, setup)
     .add_systems(Update, update_ocean_uniforms)
@@ -64,9 +66,12 @@ fn setup(
     ));
 
     // Placeholder floating object — swap this mesh for a real boat/buoy asset later.
-    // Half-extents (1.0, 0.5, 1.0) drive both the buoyancy sample footprint and this box's size.
+    // Half-extents drive both the buoyancy sample footprint and this box's size.
+    // Rigid-body integration, mass, and damping are all Avian's job here; buoyancy.rs only
+    // supplies the per-frame force from integrating submerged volume against the waves.
     let buoy = Buoyant::default();
-    let float_mesh = meshes.add(Cuboid::from_size(buoy.half_extents * 2.0));
+    let size = buoy.half_extents * 2.0;
+    let float_mesh = meshes.add(Cuboid::from_size(size));
     let float_material = standard_materials.add(StandardMaterial {
         base_color: Color::srgb(0.55, 0.35, 0.2),
         ..default()
@@ -76,8 +81,11 @@ fn setup(
         MeshMaterial3d(float_material),
         Transform::from_xyz(15.0, 1.5, 0.0),
         buoy,
-        LinearVelocity::default(),
-        AngularVelocity::default(),
+        RigidBody::Dynamic,
+        Collider::cuboid(size.x, size.y, size.z),
+        ColliderDensity(500.0), // wood-like density; combined with hull volume gives mass/inertia
+        LinearDamping(0.7),
+        AngularDamping(1.3),
     ));
 }
 
