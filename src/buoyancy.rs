@@ -5,9 +5,12 @@ use crate::ocean_waves::wave_height;
 const GRAVITY: f32 = 9.81;
 
 /// Marks an entity as a floating rigid body driven by the ocean surface.
-/// Buoyancy is sampled at the 4 corners of the footprint defined by `half_extents`,
-/// so torque (pitch/roll) emerges from uneven submersion across the waves rather
-/// than being approximated from a single point.
+/// The hull volume is divided into a 3D grid of cells; each cell center is transformed to world
+/// space and tested against the local wave height at its own (x, z). Cells below the surface
+/// contribute buoyant force via Archimedes' principle (`water_density * g * cell_volume`).
+/// Testing the whole volume (not just a fixed "bottom" face) keeps the model correct at any
+/// orientation, so torque genuinely restores the hull toward upright instead of only doing so
+/// for small tilts.
 #[derive(Component, Debug, Clone)]
 pub struct Buoyant {
     pub mass: f32,
@@ -15,23 +18,42 @@ pub struct Buoyant {
     /// Off-axis (product of inertia) terms are assumed negligible for this shape.
     pub inertia: Vec3,
     pub half_extents: Vec3,
-    /// > 1.0 makes the object ride higher (net buoyant force exceeds weight while
-    /// fully submerged), settling into equilibrium partway out of the water.
-    pub buoyancy_multiplier: f32,
+    /// kg/m³. Fresh water ≈ 1000, seawater ≈ 1025. Equilibrium submerged volume is
+    /// `mass / water_density` (Archimedes), so how deep the object rides falls out of
+    /// `mass` vs. this and the hull volume rather than a hand-tuned multiplier.
+    pub water_density: f32,
     pub linear_damping: f32,
     pub angular_damping: f32,
+    /// Resolution of the 3D grid used to integrate submerged volume across the hull.
+    pub sample_grid: (u32, u32, u32),
+}
+
+impl Buoyant {
+    /// Builds a `Buoyant` for a solid cuboid hull, deriving its moment of inertia from `mass`
+    /// and `half_extents` so the two stay physically consistent when either is tuned.
+    pub fn new(mass: f32, half_extents: Vec3) -> Self {
+        let size = half_extents * 2.0;
+        let inertia = Vec3::new(
+            mass / 12.0 * (size.y * size.y + size.z * size.z),
+            mass / 12.0 * (size.x * size.x + size.z * size.z),
+            mass / 12.0 * (size.x * size.x + size.y * size.y),
+        );
+        Self {
+            mass,
+            inertia,
+            half_extents,
+            water_density: 1000.0,
+            linear_damping: 0.7,
+            angular_damping: 1.3,
+            sample_grid: (4, 4, 4),
+        }
+    }
 }
 
 impl Default for Buoyant {
     fn default() -> Self {
-        Self {
-            mass: 30.0,
-            inertia: Vec3::new(8.0, 10.0, 8.0),
-            half_extents: Vec3::new(1.0, 0.5, 1.0),
-            buoyancy_multiplier: 1.15,
-            linear_damping: 0.7,
-            angular_damping: 1.3,
-        }
+        // 2x1x2 m hull at 2000 kg -> density 500 kg/m^3 (like wood), rides about half-submerged.
+        Self::new(2000.0, Vec3::new(1.0, 0.5, 1.0))
     }
 }
 
@@ -60,32 +82,33 @@ fn apply_buoyancy(
     let t = time.elapsed_secs();
 
     for (mut transform, mut lin_vel, mut ang_vel, buoy) in &mut query {
-        let corners_local = [
-            Vec3::new(-buoy.half_extents.x, 0.0, -buoy.half_extents.z),
-            Vec3::new(buoy.half_extents.x, 0.0, -buoy.half_extents.z),
-            Vec3::new(-buoy.half_extents.x, 0.0, buoy.half_extents.z),
-            Vec3::new(buoy.half_extents.x, 0.0, buoy.half_extents.z),
-        ];
-
-        // Force a fully-submerged corner would contribute, spread evenly over the 4 corners.
-        let max_submersion = buoy.half_extents.y * 2.0;
-        let force_per_corner_at_full_submersion =
-            (buoy.mass * GRAVITY * buoy.buoyancy_multiplier) / (4.0 * max_submersion.max(0.001));
+        let (nx, ny, nz) = buoy.sample_grid;
+        let size = buoy.half_extents * 2.0;
+        let cell_size = Vec3::new(size.x / nx as f32, size.y / ny as f32, size.z / nz as f32);
+        let cell_volume = cell_size.x * cell_size.y * cell_size.z;
+        let cell_force = buoy.water_density * GRAVITY * cell_volume;
 
         let mut net_force = Vec3::new(0.0, -buoy.mass * GRAVITY, 0.0);
         let mut net_torque = Vec3::ZERO;
 
-        for local in corners_local {
-            let world = transform.transform_point(local);
-            let surface_y = wave_height(Vec2::new(world.x, world.z), t);
-            let submersion = (surface_y - world.y).clamp(0.0, max_submersion);
-            if submersion <= 0.0 {
-                continue;
-            }
+        for ix in 0..nx {
+            let local_x = -buoy.half_extents.x + cell_size.x * (ix as f32 + 0.5);
+            for iy in 0..ny {
+                let local_y = -buoy.half_extents.y + cell_size.y * (iy as f32 + 0.5);
+                for iz in 0..nz {
+                    let local_z = -buoy.half_extents.z + cell_size.z * (iz as f32 + 0.5);
+                    let world = transform.transform_point(Vec3::new(local_x, local_y, local_z));
 
-            let force = Vec3::new(0.0, force_per_corner_at_full_submersion * submersion, 0.0);
-            net_force += force;
-            net_torque += (world - transform.translation).cross(force);
+                    let surface_y = wave_height(Vec2::new(world.x, world.z), t);
+                    if world.y >= surface_y {
+                        continue;
+                    }
+
+                    let force = Vec3::new(0.0, cell_force, 0.0);
+                    net_force += force;
+                    net_torque += (world - transform.translation).cross(force);
+                }
+            }
         }
 
         // Linear drag approximates water resistance.
